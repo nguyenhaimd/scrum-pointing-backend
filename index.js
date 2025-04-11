@@ -1,84 +1,97 @@
+// Updated backend with avatars and user join/leave notifications
 const express = require('express');
 const http = require('http');
-const { Server } = require('socket.io');
 const cors = require('cors');
+const { Server } = require('socket.io');
 
 const app = express();
+app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
 });
 
-app.use(cors());
-
-const sessions = {};
+const sessions = {}; // room => { votes, storyTitle, sessionActive, roles, avatars, participants }
 
 io.on('connection', (socket) => {
-  socket.on('join', ({ nickname, room }) => {
+  let userRoom = '';
+  let userName = '';
+
+  socket.on('join', ({ nickname, room, role, avatar }) => {
+    userRoom = room;
+    userName = nickname;
     socket.join(room);
-    socket.data.nickname = nickname;
-    socket.data.room = room;
 
     if (!sessions[room]) {
       sessions[room] = {
-        participants: new Set(),
         votes: {},
-        scrumMaster: nickname.toLowerCase().includes('scrum') ? nickname : null,
+        storyTitle: '',
         sessionActive: false,
-        storyTitle: ''
+        roles: {},
+        avatars: {},
+        participants: new Set()
       };
     }
 
     sessions[room].participants.add(nickname);
-    io.to(room).emit('participantsUpdate', Array.from(sessions[room].participants));
+    sessions[room].roles[nickname] = role;
+    sessions[room].avatars[nickname] = avatar;
+
+    io.to(room).emit('participantsUpdate', {
+      names: Array.from(sessions[room].participants),
+      roles: sessions[room].roles,
+      avatars: sessions[room].avatars
+    });
+
+    io.to(room).emit('userJoined', nickname);
   });
 
-  socket.on('disconnect', () => {
-    const room = socket.data.room;
-    const nickname = socket.data.nickname;
-    if (room && sessions[room]) {
-      sessions[room].participants.delete(nickname);
-      delete sessions[room].votes[nickname];
-      io.to(room).emit('participantsUpdate', Array.from(sessions[room].participants));
-      io.to(room).emit('updateVotes', sessions[room].votes);
+  socket.on('vote', ({ nickname, point }) => {
+    if (sessions[userRoom]) {
+      sessions[userRoom].votes[nickname] = point;
+      io.to(userRoom).emit('updateVotes', sessions[userRoom].votes);
     }
   });
 
   socket.on('startSession', ({ title, room }) => {
-    const session = sessions[room];
-    if (session) {
-      session.storyTitle = title;
-      session.votes = {};
-      session.sessionActive = true;
+    if (sessions[room]) {
+      sessions[room].storyTitle = title;
+      sessions[room].votes = {};
+      sessions[room].sessionActive = true;
       io.to(room).emit('startSession', title);
-      io.to(room).emit('updateVotes', session.votes);
-    }
-  });
-
-  socket.on('vote', ({ nickname, point }) => {
-    const room = socket.data.room;
-    const session = sessions[room];
-    if (session) {
-      session.votes[nickname] = point;
-      io.to(room).emit('updateVotes', session.votes);
+      io.to(room).emit('updateVotes', {});
     }
   });
 
   socket.on('revealVotes', () => {
-    const room = socket.data.room;
-    if (sessions[room]) {
-      io.to(room).emit('revealVotes');
-    }
+    io.to(userRoom).emit('revealVotes');
   });
 
   socket.on('endSession', () => {
-    const room = socket.data.room;
-    const session = sessions[room];
-    if (session) {
-      session.sessionActive = false;
-      session.storyTitle = '';
-      session.votes = {};
-      io.to(room).emit('sessionEnded');
+    if (sessions[userRoom]) {
+      sessions[userRoom].sessionActive = false;
+      sessions[userRoom].votes = {};
+      io.to(userRoom).emit('sessionEnded');
+    }
+  });
+
+  socket.on('disconnect', () => {
+    if (userRoom && sessions[userRoom]) {
+      sessions[userRoom].participants.delete(userName);
+      delete sessions[userRoom].roles[userName];
+      delete sessions[userRoom].avatars[userName];
+      delete sessions[userRoom].votes[userName];
+
+      io.to(userRoom).emit('participantsUpdate', {
+        names: Array.from(sessions[userRoom].participants),
+        roles: sessions[userRoom].roles,
+        avatars: sessions[userRoom].avatars
+      });
+
+      io.to(userRoom).emit('userLeft', userName);
     }
   });
 });
