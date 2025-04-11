@@ -1,4 +1,4 @@
-// Updated backend with avatars and user join/leave notifications
+// Updated backend with support for team chat
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -76,6 +76,10 @@ io.on('connection', (socket) => {
       sessions[userRoom].votes = {};
       io.to(userRoom).emit('sessionEnded');
     }
+  });
+
+  socket.on('teamChat', ({ room, sender, text }) => {
+    io.to(room).emit('teamChat', { sender, text });
   });
 
   socket.on('disconnect', () => {
