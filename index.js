@@ -14,7 +14,7 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // { roomName: [user1, user2, ...] }
+const rooms = {};
 const userRoles = {};
 const userAvatars = {};
 const votes = {};
@@ -23,6 +23,9 @@ const sessions = {};
 io.on('connection', (socket) => {
   socket.on('join', ({ nickname, room, role, avatar }) => {
     socket.join(room);
+    socket.nickname = nickname;
+    socket.room = room;
+
     if (!rooms[room]) rooms[room] = [];
     if (!rooms[room].includes(nickname)) rooms[room].push(nickname);
     userRoles[nickname] = role;
@@ -40,9 +43,9 @@ io.on('connection', (socket) => {
 
   socket.on('vote', ({ nickname, point }) => {
     votes[nickname] = point;
-    const userRoom = getUserRoom(nickname);
-    if (userRoom) {
-      io.to(userRoom).emit('updateVotes', votes);
+    const room = socket.room;
+    if (room) {
+      io.to(room).emit('updateVotes', votes);
     }
   });
 
@@ -55,16 +58,16 @@ io.on('connection', (socket) => {
   });
 
   socket.on('revealVotes', () => {
-    const userRoom = getSocketRoom(socket);
-    if (userRoom) {
-      io.to(userRoom).emit('revealVotes');
+    const room = socket.room;
+    if (room) {
+      io.to(room).emit('revealVotes');
     }
   });
 
   socket.on('endSession', () => {
-    const userRoom = getSocketRoom(socket);
-    if (userRoom) {
-      io.to(userRoom).emit('sessionEnded');
+    const room = socket.room;
+    if (room) {
+      io.to(room).emit('sessionEnded');
     }
   });
 
@@ -73,43 +76,30 @@ io.on('connection', (socket) => {
   });
 
   socket.on('emojiReaction', ({ sender, emoji }) => {
-    const room = getUserRoom(sender);
+    const room = socket.room;
     if (room) {
       io.to(room).emit('emojiReaction', { sender, emoji });
     }
   });
 
   socket.on('disconnect', () => {
-    const nickname = Object.keys(userRoles).find(name => socket.rooms.has(getUserRoom(name)));
-    const room = getUserRoom(nickname);
-    if (nickname && room && rooms[room]) {
-      rooms[room] = rooms[room].filter(name => name !== nickname);
-      delete userRoles[nickname];
-      delete userAvatars[nickname];
-      delete votes[nickname];
+    const { nickname, room } = socket;
+    if (!nickname || !room || !rooms[room]) return;
 
-      io.to(room).emit('participantsUpdate', {
-        names: rooms[room],
-        roles: userRoles,
-        avatars: userAvatars
-      });
+    rooms[room] = rooms[room].filter(name => name !== nickname);
+    delete userRoles[nickname];
+    delete userAvatars[nickname];
+    delete votes[nickname];
 
-      io.to(room).emit('userLeft', nickname);
-    }
+    io.to(room).emit('participantsUpdate', {
+      names: rooms[room],
+      roles: userRoles,
+      avatars: userAvatars
+    });
+
+    io.to(room).emit('userLeft', nickname);
   });
 });
-
-function getUserRoom(nickname) {
-  for (const room in rooms) {
-    if (rooms[room].includes(nickname)) return room;
-  }
-  return null;
-}
-
-function getSocketRoom(socket) {
-  const joinedRooms = Array.from(socket.rooms).filter(r => r !== socket.id);
-  return joinedRooms[0] || null;
-}
 
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
