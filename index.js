@@ -10,8 +10,8 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST'],
-  },
+    methods: ['GET', 'POST']
+  }
 });
 
 const rooms = {};
@@ -19,11 +19,10 @@ const userRoles = {};
 const userAvatars = {};
 const votes = {};
 const sessions = {};
-const emojiCounts = {};       // Tracks emoji reactions per room
-const typingUsers = {};       // Tracks users who are typing per room
+const emojiCounts = {};
+const typingUsers = {};
 
 io.on('connection', (socket) => {
-  // Track socket status
   socket.on('connect', () => {
     socket.emit('connectionStatus', 'connected');
   });
@@ -44,7 +43,7 @@ io.on('connection', (socket) => {
     io.to(room).emit('participantsUpdate', {
       names: rooms[room],
       roles: userRoles,
-      avatars: userAvatars,
+      avatars: userAvatars
     });
 
     io.to(room).emit('userJoined', nickname);
@@ -91,7 +90,7 @@ io.on('connection', (socket) => {
     emojiCounts[room][emoji] = (emojiCounts[room][emoji] || 0) + 1;
 
     io.to(room).emit('emojiReaction', { sender, emoji });
-    io.to(room).emit('emojiSummary', emojiCounts[room]); // broadcast emoji summary
+    io.to(room).emit('emojiSummary', emojiCounts[room]);
   });
 
   socket.on('userTyping', () => {
@@ -127,7 +126,7 @@ io.on('connection', (socket) => {
     io.to(room).emit('participantsUpdate', {
       names: rooms[room],
       roles: userRoles,
-      avatars: userAvatars,
+      avatars: userAvatars
     });
 
     io.to(room).emit('userLeft', nickname);
