@@ -10,8 +10,8 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST']
-  }
+    methods: ['GET', 'POST'],
+  },
 });
 
 const rooms = {};
@@ -19,8 +19,15 @@ const userRoles = {};
 const userAvatars = {};
 const votes = {};
 const sessions = {};
+const emojiCounts = {};       // Tracks emoji reactions per room
+const typingUsers = {};       // Tracks users who are typing per room
 
 io.on('connection', (socket) => {
+  // Track socket status
+  socket.on('connect', () => {
+    socket.emit('connectionStatus', 'connected');
+  });
+
   socket.on('join', ({ nickname, room, role, avatar }) => {
     socket.join(room);
     socket.nickname = nickname;
@@ -31,11 +38,13 @@ io.on('connection', (socket) => {
     userRoles[nickname] = role;
     userAvatars[nickname] = avatar;
     votes[nickname] = null;
+    if (!emojiCounts[room]) emojiCounts[room] = {};
+    if (!typingUsers[room]) typingUsers[room] = new Set();
 
     io.to(room).emit('participantsUpdate', {
       names: rooms[room],
       roles: userRoles,
-      avatars: userAvatars
+      avatars: userAvatars,
     });
 
     io.to(room).emit('userJoined', nickname);
@@ -77,24 +86,48 @@ io.on('connection', (socket) => {
 
   socket.on('emojiReaction', ({ sender, emoji }) => {
     const room = socket.room;
-    if (room) {
-      io.to(room).emit('emojiReaction', { sender, emoji });
-    }
+    if (!room) return;
+
+    emojiCounts[room][emoji] = (emojiCounts[room][emoji] || 0) + 1;
+
+    io.to(room).emit('emojiReaction', { sender, emoji });
+    io.to(room).emit('emojiSummary', emojiCounts[room]); // broadcast emoji summary
+  });
+
+  socket.on('userTyping', () => {
+    const { nickname, room } = socket;
+    if (!room || !nickname) return;
+    typingUsers[room].add(nickname);
+    io.to(room).emit('typingUpdate', Array.from(typingUsers[room]));
+
+    setTimeout(() => {
+      typingUsers[room].delete(nickname);
+      io.to(room).emit('typingUpdate', Array.from(typingUsers[room]));
+    }, 3000);
+  });
+
+  socket.on('disconnecting', () => {
+    socket.emit('connectionStatus', 'disconnected');
   });
 
   socket.on('disconnect', () => {
     const { nickname, room } = socket;
     if (!nickname || !room || !rooms[room]) return;
 
-    rooms[room] = rooms[room].filter(name => name !== nickname);
+    rooms[room] = rooms[room].filter((name) => name !== nickname);
     delete userRoles[nickname];
     delete userAvatars[nickname];
     delete votes[nickname];
 
+    if (typingUsers[room]) {
+      typingUsers[room].delete(nickname);
+      io.to(room).emit('typingUpdate', Array.from(typingUsers[room]));
+    }
+
     io.to(room).emit('participantsUpdate', {
       names: rooms[room],
       roles: userRoles,
-      avatars: userAvatars
+      avatars: userAvatars,
     });
 
     io.to(room).emit('userLeft', nickname);
