@@ -1,4 +1,4 @@
-// ✅ FULL BACKEND index.js for Scrum Pointing App with 21+ frontend features
+// ✅ FULL BACKEND index.js for Scrum Pointing App with vote history support
 
 const express = require('express');
 const http = require('http');
@@ -16,7 +16,7 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods } }
+const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, currentStory, voteStart, typing } }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -35,6 +35,8 @@ io.on('connection', (socket) => {
         avatars: {},
         moods: {},
         typing: [],
+        currentStory: '',
+        voteStart: null,
       };
     }
 
@@ -69,12 +71,16 @@ io.on('connection', (socket) => {
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes = {};
+      rooms[currentRoom].currentStory = '';
+      rooms[currentRoom].voteStart = null;
       io.to(currentRoom).emit('sessionEnded');
     }
   });
 
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
+      rooms[room].currentStory = title;
+      rooms[room].voteStart = Date.now();
       rooms[room].votes = {};
       rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
       io.to(room).emit('startSession', title);
