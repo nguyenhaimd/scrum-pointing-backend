@@ -14,7 +14,7 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // room state storage
+const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, typing, currentStoryTitle } }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -33,7 +33,7 @@ io.on('connection', (socket) => {
         avatars: {},
         moods: {},
         typing: [],
-        currentStory: '',
+        currentStoryTitle: ''
       };
     }
 
@@ -48,7 +48,7 @@ io.on('connection', (socket) => {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods,
+      moods: r.moods
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -61,31 +61,27 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('startSession', ({ title, room }) => {
-    if (rooms[room]) {
-      const r = rooms[room];
-      r.votes = {};
-      r.participants.forEach(p => {
-        r.votes[p] = null;
-      });
-      r.currentStory = title;
-      io.to(room).emit('startSession', title);
-    }
-  });
-
   socket.on('revealVotes', () => {
-    if (currentRoom && rooms[currentRoom]) {
-      const r = rooms[currentRoom];
-      io.to(currentRoom).emit('revealVotes', { story: r.currentStory });
+    if (rooms[currentRoom]) {
+      const story = rooms[currentRoom].currentStoryTitle || '';
+      io.to(currentRoom).emit('revealVotes', { story });
     }
   });
 
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
-      const r = rooms[currentRoom];
-      r.votes = {};
-      r.currentStory = '';
+      rooms[currentRoom].votes = {};
+      rooms[currentRoom].currentStoryTitle = '';
       io.to(currentRoom).emit('sessionEnded');
+    }
+  });
+
+  socket.on('startSession', ({ title, room }) => {
+    if (rooms[room]) {
+      rooms[room].votes = {};
+      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
+      rooms[room].currentStoryTitle = title;
+      io.to(room).emit('startSession', title);
     }
   });
 
@@ -105,9 +101,7 @@ io.on('connection', (socket) => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const room = rooms[currentRoom];
     if (!room.typing.includes(nickname)) room.typing.push(nickname);
-
     io.to(currentRoom).emit('typingUpdate', room.typing);
-
     setTimeout(() => {
       room.typing = room.typing.filter(name => name !== nickname);
       io.to(currentRoom).emit('typingUpdate', room.typing);
@@ -128,7 +122,6 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
-
     const r = rooms[currentRoom];
     r.participants = r.participants.filter(p => p !== nickname);
     delete r.votes[nickname];
@@ -140,14 +133,11 @@ io.on('connection', (socket) => {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods,
+      moods: r.moods
     });
-
     socket.to(currentRoom).emit('userLeft', nickname);
 
-    if (r.participants.length === 0) {
-      delete rooms[currentRoom];
-    }
+    if (r.participants.length === 0) delete rooms[currentRoom];
   });
 });
 
