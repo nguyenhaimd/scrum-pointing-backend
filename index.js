@@ -1,5 +1,3 @@
-// ✅ FULL BACKEND index.js for Scrum Pointing App with vote summary sent only to Scrum Master
-
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -16,8 +14,7 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, typing, story } }
-const userSockets = {}; // { nickname: socket.id }
+const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, currentStory } }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -27,8 +24,7 @@ io.on('connection', (socket) => {
     nickname = name;
     currentRoom = room;
     socket.join(room);
-
-    userSockets[nickname] = socket.id;
+    socket.nickname = name; // 🔐 Store nickname per socket
 
     if (!rooms[room]) {
       rooms[room] = {
@@ -38,7 +34,7 @@ io.on('connection', (socket) => {
         avatars: {},
         moods: {},
         typing: [],
-        story: null,
+        currentStory: ''
       };
     }
 
@@ -66,32 +62,73 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('startSession', ({ title, room }) => {
+    if (rooms[room]) {
+      rooms[room].votes = {};
+      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
+      rooms[room].currentStory = title || '';
+      io.to(room).emit('startSession', title);
+    }
+  });
+
   socket.on('revealVotes', () => {
     if (!rooms[currentRoom]) return;
-    const room = rooms[currentRoom];
-    const votes = room.votes;
-    const story = room.story || 'Untitled Story';
-    const scrumMaster = Object.entries(room.roles).find(([name, role]) => role === 'Scrum Master')?.[0];
 
-    if (scrumMaster && userSockets[scrumMaster]) {
-      io.to(userSockets[scrumMaster]).emit('revealVotes', { story, votes });
+    const room = rooms[currentRoom];
+    const developers = room.participants.filter(p => room.roles[p] === 'Developer');
+    const votes = room.votes || {};
+    const freq = {};
+
+    developers.forEach((name) => {
+      const point = Number(votes[name]);
+      if (!isNaN(point)) freq[point] = (freq[point] || 0) + 1;
+    });
+
+    const max = Math.max(...Object.values(freq));
+    const consensus = Object.keys(freq)
+      .filter(k => freq[k] === max)
+      .map(Number);
+
+    const voteList = developers.map((name) => ({
+      name,
+      avatar: room.avatars[name],
+      point: votes[name]
+    }));
+
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Send reveal to all clients
+    io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
+
+    // Send vote summary ONLY to Scrum Master
+    const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
+
+    for (const smName of scrumMasters) {
+      const smSocket = [...io.sockets.sockets.values()].find(
+        s => s.rooms.has(currentRoom) && s.nickname === smName
+      );
+
+      if (smSocket) {
+        smSocket.emit('teamChat', {
+          type: 'voteSummary',
+          summary: {
+            story: room.currentStory || 'Untitled Story',
+            consensus,
+            votes: voteList,
+            timestamp,
+            expand: false
+          }
+        });
+      }
     }
   });
 
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes = {};
-      rooms[currentRoom].story = null;
+      rooms[currentRoom].currentStory = '';
       io.to(currentRoom).emit('sessionEnded');
-    }
-  });
-
-  socket.on('startSession', ({ title, room }) => {
-    if (rooms[room]) {
-      rooms[room].votes = {};
-      rooms[room].story = title;
-      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
-      io.to(room).emit('startSession', title);
     }
   });
 
@@ -138,7 +175,6 @@ io.on('connection', (socket) => {
     delete r.roles[nickname];
     delete r.avatars[nickname];
     delete r.moods[nickname];
-    delete userSockets[nickname];
 
     io.to(currentRoom).emit('participantsUpdate', {
       names: r.participants,
