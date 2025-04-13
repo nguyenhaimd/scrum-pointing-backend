@@ -1,3 +1,5 @@
+// ✅ Updated backend index.js for Scrum Pointing App
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -14,7 +16,7 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // Stores all room data
+const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, story, typing } }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -28,11 +30,12 @@ io.on('connection', (socket) => {
     if (!rooms[room]) {
       rooms[room] = {
         participants: [],
+        votes: {},
         roles: {},
         avatars: {},
         moods: {},
-        votes: {},
         typing: [],
+        story: '',
       };
     }
 
@@ -47,17 +50,16 @@ io.on('connection', (socket) => {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods,
+      moods: r.moods
     });
 
     socket.to(room).emit('userJoined', nickname);
   });
 
   socket.on('vote', ({ nickname: name, point }) => {
-    const r = rooms[currentRoom];
-    if (r) {
-      r.votes[name] = point;
-      io.to(currentRoom).emit('updateVotes', r.votes);
+    if (rooms[currentRoom]) {
+      rooms[currentRoom].votes[name] = point;
+      io.to(currentRoom).emit('updateVotes', rooms[currentRoom].votes);
     }
   });
 
@@ -66,27 +68,23 @@ io.on('connection', (socket) => {
     const room = rooms[currentRoom];
     const votes = room.votes;
     const story = room.story || 'Untitled Story';
-  
+
     io.to(currentRoom).emit('revealVotes', { story, votes });
   });
 
   socket.on('endSession', () => {
-    const r = rooms[currentRoom];
-    if (r) {
-      r.votes = {};
-      r.currentStory = null;
+    if (rooms[currentRoom]) {
+      rooms[currentRoom].votes = {};
+      rooms[currentRoom].story = '';
       io.to(currentRoom).emit('sessionEnded');
     }
   });
 
   socket.on('startSession', ({ title, room }) => {
-    const r = rooms[room];
-    if (r) {
-      r.votes = {};
-      r.currentStory = title;
-      r.participants.forEach(p => {
-        r.votes[p] = null;
-      });
+    if (rooms[room]) {
+      rooms[room].votes = {};
+      rooms[room].story = title; // 🔥 Track current story title
+      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
       io.to(room).emit('startSession', title);
     }
   });
@@ -104,56 +102,48 @@ io.on('connection', (socket) => {
   });
 
   socket.on('userTyping', () => {
-    const r = rooms[currentRoom];
-    if (r && !r.typing.includes(nickname)) {
-      r.typing.push(nickname);
-      io.to(currentRoom).emit('typingUpdate', r.typing);
-      setTimeout(() => {
-        r.typing = r.typing.filter(n => n !== nickname);
-        io.to(currentRoom).emit('typingUpdate', r.typing);
-      }, 3000);
-    }
+    if (!currentRoom || !rooms[currentRoom]) return;
+    const room = rooms[currentRoom];
+    if (!room.typing.includes(nickname)) room.typing.push(nickname);
+    io.to(currentRoom).emit('typingUpdate', room.typing);
+    setTimeout(() => {
+      room.typing = room.typing.filter(name => name !== nickname);
+      io.to(currentRoom).emit('typingUpdate', room.typing);
+    }, 3000);
   });
 
   socket.on('updateMood', ({ nickname: name, emoji }) => {
-    const r = rooms[currentRoom];
-    if (r) {
-      r.moods[name] = emoji;
+    if (rooms[currentRoom]) {
+      rooms[currentRoom].moods[name] = emoji;
       io.to(currentRoom).emit('participantsUpdate', {
-        names: r.participants,
-        roles: r.roles,
-        avatars: r.avatars,
-        moods: r.moods,
+        names: rooms[currentRoom].participants,
+        roles: rooms[currentRoom].roles,
+        avatars: rooms[currentRoom].avatars,
+        moods: rooms[currentRoom].moods,
       });
     }
   });
 
   socket.on('disconnect', () => {
+    if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
-    if (r) {
-      r.participants = r.participants.filter(p => p !== nickname);
-      delete r.roles[nickname];
-      delete r.avatars[nickname];
-      delete r.moods[nickname];
-      delete r.votes[nickname];
+    r.participants = r.participants.filter(p => p !== nickname);
+    delete r.votes[nickname];
+    delete r.roles[nickname];
+    delete r.avatars[nickname];
+    delete r.moods[nickname];
 
-      io.to(currentRoom).emit('participantsUpdate', {
-        names: r.participants,
-        roles: r.roles,
-        avatars: r.avatars,
-        moods: r.moods,
-      });
+    io.to(currentRoom).emit('participantsUpdate', {
+      names: r.participants,
+      roles: r.roles,
+      avatars: r.avatars,
+      moods: r.moods
+    });
+    socket.to(currentRoom).emit('userLeft', nickname);
 
-      socket.to(currentRoom).emit('userLeft', nickname);
-
-      if (r.participants.length === 0) {
-        delete rooms[currentRoom];
-      }
-    }
+    if (r.participants.length === 0) delete rooms[currentRoom];
   });
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => {
-  console.log(`✅ Scrum Pointing backend running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`✅ Scrum Pointing server running on port ${PORT}`));
