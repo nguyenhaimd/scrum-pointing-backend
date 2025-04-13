@@ -1,3 +1,5 @@
+// ✅ Cleaned-up FULL BACKEND index.js for Scrum Pointing App (no stray messages)
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -24,7 +26,7 @@ io.on('connection', (socket) => {
     nickname = name;
     currentRoom = room;
     socket.join(room);
-    socket.nickname = name; // 🔐 Store nickname per socket
+    socket.nickname = nickname; // for targeted emissions later
 
     if (!rooms[room]) {
       rooms[room] = {
@@ -34,7 +36,7 @@ io.on('connection', (socket) => {
         avatars: {},
         moods: {},
         typing: [],
-        currentStory: ''
+        currentStory: '',
       };
     }
 
@@ -49,7 +51,7 @@ io.on('connection', (socket) => {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods
+      moods: r.moods,
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -59,15 +61,6 @@ io.on('connection', (socket) => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes[name] = point;
       io.to(currentRoom).emit('updateVotes', rooms[currentRoom].votes);
-    }
-  });
-
-  socket.on('startSession', ({ title, room }) => {
-    if (rooms[room]) {
-      rooms[room].votes = {};
-      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
-      rooms[room].currentStory = title || '';
-      io.to(room).emit('startSession', title);
     }
   });
 
@@ -92,16 +85,15 @@ io.on('connection', (socket) => {
     const voteList = developers.map((name) => ({
       name,
       avatar: room.avatars[name],
-      point: votes[name]
+      point: votes[name],
     }));
 
     const now = new Date();
     const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // Send reveal to all clients
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
 
-    // Send vote summary ONLY to Scrum Master
+    // Only send vote summary to Scrum Master(s)
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
 
     for (const smName of scrumMasters) {
@@ -117,7 +109,7 @@ io.on('connection', (socket) => {
             consensus,
             votes: voteList,
             timestamp,
-            expand: false
+            expand: false,
           }
         });
       }
@@ -132,8 +124,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('startSession', ({ title, room }) => {
+    if (rooms[room]) {
+      rooms[room].votes = {};
+      rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
+      rooms[room].currentStory = title;
+      io.to(room).emit('startSession', title);
+    }
+  });
+
   socket.on('teamChat', ({ sender, text }) => {
-    if (currentRoom) {
+    if (currentRoom && text) {
       io.to(currentRoom).emit('teamChat', { sender, text });
     }
   });
@@ -180,7 +181,7 @@ io.on('connection', (socket) => {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods
+      moods: r.moods,
     });
     socket.to(currentRoom).emit('userLeft', nickname);
 
