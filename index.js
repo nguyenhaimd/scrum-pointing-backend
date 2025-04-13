@@ -62,10 +62,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('revealVotes', () => {
-    const r = rooms[currentRoom];
-    if (r) {
-      io.to(currentRoom).emit('revealVotes', { story: r.currentStory });
-    }
+    if (!rooms[currentRoom]) return;
+    const room = rooms[currentRoom];
+    const votes = room.votes;
+    const story = room.story || 'Untitled Story';
+  
+    io.to(currentRoom).emit('revealVotes', { story, votes });
   });
 
   socket.on('endSession', () => {
