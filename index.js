@@ -1,4 +1,4 @@
-// ✅ Updated backend index.js for Scrum Pointing App
+// ✅ FULL BACKEND index.js for Scrum Pointing App with vote summary sent only to Scrum Master
 
 const express = require('express');
 const http = require('http');
@@ -16,7 +16,8 @@ const io = new Server(server, {
   }
 });
 
-const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, story, typing } }
+const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, typing, story } }
+const userSockets = {}; // { nickname: socket.id }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -27,6 +28,8 @@ io.on('connection', (socket) => {
     currentRoom = room;
     socket.join(room);
 
+    userSockets[nickname] = socket.id;
+
     if (!rooms[room]) {
       rooms[room] = {
         participants: [],
@@ -35,7 +38,7 @@ io.on('connection', (socket) => {
         avatars: {},
         moods: {},
         typing: [],
-        story: '',
+        story: null,
       };
     }
 
@@ -68,14 +71,17 @@ io.on('connection', (socket) => {
     const room = rooms[currentRoom];
     const votes = room.votes;
     const story = room.story || 'Untitled Story';
+    const scrumMaster = Object.entries(room.roles).find(([name, role]) => role === 'Scrum Master')?.[0];
 
-    io.to(currentRoom).emit('revealVotes', { story, votes });
+    if (scrumMaster && userSockets[scrumMaster]) {
+      io.to(userSockets[scrumMaster]).emit('revealVotes', { story, votes });
+    }
   });
 
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes = {};
-      rooms[currentRoom].story = '';
+      rooms[currentRoom].story = null;
       io.to(currentRoom).emit('sessionEnded');
     }
   });
@@ -83,7 +89,7 @@ io.on('connection', (socket) => {
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
       rooms[room].votes = {};
-      rooms[room].story = title; // 🔥 Track current story title
+      rooms[room].story = title;
       rooms[room].participants.forEach(p => rooms[room].votes[p] = null);
       io.to(room).emit('startSession', title);
     }
@@ -132,6 +138,7 @@ io.on('connection', (socket) => {
     delete r.roles[nickname];
     delete r.avatars[nickname];
     delete r.moods[nickname];
+    delete userSockets[nickname];
 
     io.to(currentRoom).emit('participantsUpdate', {
       names: r.participants,
