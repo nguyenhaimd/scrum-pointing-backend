@@ -1,4 +1,4 @@
-// ✅ Cleaned-up FULL BACKEND index.js for Scrum Pointing App (no stray messages)
+// ✅ FINAL BACKEND index.js with proper timestamp + single vote summary logic
 
 const express = require('express');
 const http = require('http');
@@ -26,7 +26,7 @@ io.on('connection', (socket) => {
     nickname = name;
     currentRoom = room;
     socket.join(room);
-    socket.nickname = nickname; // for targeted emissions later
+    socket.nickname = nickname;
 
     if (!rooms[room]) {
       rooms[room] = {
@@ -65,9 +65,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('revealVotes', () => {
-    if (!rooms[currentRoom]) return;
-
     const room = rooms[currentRoom];
+    if (!room || room.roles[socket.nickname] !== 'Scrum Master') return;
+
     const developers = room.participants.filter(p => room.roles[p] === 'Developer');
     const votes = room.votes || {};
     const freq = {};
@@ -78,9 +78,7 @@ io.on('connection', (socket) => {
     });
 
     const max = Math.max(...Object.values(freq));
-    const consensus = Object.keys(freq)
-      .filter(k => freq[k] === max)
-      .map(Number);
+    const consensus = Object.keys(freq).filter(k => freq[k] === max).map(Number);
 
     const voteList = developers.map((name) => ({
       name,
@@ -89,24 +87,20 @@ io.on('connection', (socket) => {
     }));
 
     const now = new Date();
-    const timestamp = new Date().toLocaleTimeString('en-US', {
+    const timestamp = now.toLocaleTimeString('en-US', {
       hour12: false,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit'
-     // timeZone: 'America/New_York' // or remove this line to use local server time
     });
 
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
 
-    // Only send vote summary to Scrum Master(s)
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
-
     for (const smName of scrumMasters) {
       const smSocket = [...io.sockets.sockets.values()].find(
         s => s.rooms.has(currentRoom) && s.nickname === smName
       );
-
       if (smSocket) {
         smSocket.emit('teamChat', {
           type: 'voteSummary',
