@@ -89,7 +89,13 @@ io.on('connection', (socket) => {
     }));
 
     const now = new Date();
-    const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const timestamp = new Date().toLocaleTimeString('en-US', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+     // timeZone: 'America/New_York' // or remove this line to use local server time
+    });
 
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
 
