@@ -17,7 +17,8 @@ const io = new Server(server, {
   }
 });
 
-const GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes\const rooms = {}; // roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers }
+const GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes
+const rooms = {}; // roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
