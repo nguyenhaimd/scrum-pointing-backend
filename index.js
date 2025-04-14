@@ -1,4 +1,4 @@
-// ✅ FINAL BACKEND index.js with proper timestamp + single vote summary logic
+// ✅ FULL index.js for Scrum Pointing App with extended grace period & all features
 
 const express = require('express');
 const http = require('http');
@@ -12,11 +12,12 @@ app.use(cors());
 const io = new Server(server, {
   cors: {
     origin: '*',
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST']
   }
 });
 
-const rooms = {}; // { roomName: { participants, votes, roles, avatars, moods, currentStory } }
+const GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes
+const rooms = {}; // { roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers } }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -31,12 +32,13 @@ io.on('connection', (socket) => {
     if (!rooms[room]) {
       rooms[room] = {
         participants: [],
-        votes: {},
         roles: {},
         avatars: {},
         moods: {},
+        votes: {},
         typing: [],
         currentStory: '',
+        disconnectTimers: {}
       };
     }
 
@@ -47,11 +49,17 @@ io.on('connection', (socket) => {
     r.moods[nickname] = emoji;
     r.votes[nickname] = null;
 
+    // Cancel disconnect grace timer if it exists
+    if (r.disconnectTimers[nickname]) {
+      clearTimeout(r.disconnectTimers[nickname]);
+      delete r.disconnectTimers[nickname];
+    }
+
     io.to(room).emit('participantsUpdate', {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods,
+      moods: r.moods
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -65,9 +73,8 @@ io.on('connection', (socket) => {
   });
 
   socket.on('revealVotes', () => {
+    if (!rooms[currentRoom]) return;
     const room = rooms[currentRoom];
-    if (!room || room.roles[socket.nickname] !== 'Scrum Master') return;
-
     const developers = room.participants.filter(p => room.roles[p] === 'Developer');
     const votes = room.votes || {};
     const freq = {};
@@ -78,7 +85,9 @@ io.on('connection', (socket) => {
     });
 
     const max = Math.max(...Object.values(freq));
-    const consensus = Object.keys(freq).filter(k => freq[k] === max).map(Number);
+    const consensus = Object.keys(freq)
+      .filter(k => freq[k] === max)
+      .map(Number);
 
     const voteList = developers.map((name) => ({
       name,
@@ -86,13 +95,7 @@ io.on('connection', (socket) => {
       point: votes[name],
     }));
 
-    const now = new Date();
-    const timestamp = now.toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
 
@@ -101,6 +104,7 @@ io.on('connection', (socket) => {
       const smSocket = [...io.sockets.sockets.values()].find(
         s => s.rooms.has(currentRoom) && s.nickname === smName
       );
+
       if (smSocket) {
         smSocket.emit('teamChat', {
           type: 'voteSummary',
@@ -109,7 +113,7 @@ io.on('connection', (socket) => {
             consensus,
             votes: voteList,
             timestamp,
-            expand: false,
+            expand: false
           }
         });
       }
@@ -163,7 +167,7 @@ io.on('connection', (socket) => {
         names: rooms[currentRoom].participants,
         roles: rooms[currentRoom].roles,
         avatars: rooms[currentRoom].avatars,
-        moods: rooms[currentRoom].moods,
+        moods: rooms[currentRoom].moods
       });
     }
   });
@@ -171,21 +175,25 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
-    r.participants = r.participants.filter(p => p !== nickname);
-    delete r.votes[nickname];
-    delete r.roles[nickname];
-    delete r.avatars[nickname];
-    delete r.moods[nickname];
 
-    io.to(currentRoom).emit('participantsUpdate', {
-      names: r.participants,
-      roles: r.roles,
-      avatars: r.avatars,
-      moods: r.moods,
-    });
-    socket.to(currentRoom).emit('userLeft', nickname);
+    // Set a grace period before full removal
+    r.disconnectTimers[nickname] = setTimeout(() => {
+      r.participants = r.participants.filter(p => p !== nickname);
+      delete r.votes[nickname];
+      delete r.roles[nickname];
+      delete r.avatars[nickname];
+      delete r.moods[nickname];
 
-    if (r.participants.length === 0) delete rooms[currentRoom];
+      io.to(currentRoom).emit('participantsUpdate', {
+        names: r.participants,
+        roles: r.roles,
+        avatars: r.avatars,
+        moods: r.moods
+      });
+      socket.to(currentRoom).emit('userLeft', nickname);
+
+      if (r.participants.length === 0) delete rooms[currentRoom];
+    }, GRACE_PERIOD_MS);
   });
 });
 
