@@ -55,6 +55,11 @@ io.on('connection', (socket) => {
       delete r.disconnectTimers[nickname];
     }
 
+    // Inform user they successfully rejoined after disconnect
+if (socket && r.disconnectTimers[nickname] !== undefined) {
+  socket.emit('rejoinedGracefully', { nickname });
+}
+
     io.to(room).emit('participantsUpdate', {
       names: r.participants,
       roles: r.roles,
