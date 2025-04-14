@@ -1,4 +1,5 @@
-// ✅ FULL index.js for Scrum Pointing App with extended grace period & all features
+// ✅ FINAL Full Backend index.js for Scrum Pointing App
+// Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking
 
 const express = require('express');
 const http = require('http');
@@ -16,8 +17,7 @@ const io = new Server(server, {
   }
 });
 
-const GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes
-const rooms = {}; // { roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers } }
+const GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes\const rooms = {}; // roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
@@ -43,28 +43,29 @@ io.on('connection', (socket) => {
     }
 
     const r = rooms[room];
-    if (!r.participants.includes(nickname)) r.participants.push(nickname);
+
+    if (!r.participants.includes(nickname)) {
+      r.participants.push(nickname);
+    } else if (r.disconnectTimers[nickname]) {
+      clearTimeout(r.disconnectTimers[nickname]);
+      delete r.disconnectTimers[nickname];
+    }
+
     r.roles[nickname] = role;
     r.avatars[nickname] = avatar;
     r.moods[nickname] = emoji;
     r.votes[nickname] = null;
 
-    // Cancel disconnect grace timer if it exists
-    if (r.disconnectTimers[nickname]) {
-      clearTimeout(r.disconnectTimers[nickname]);
-      delete r.disconnectTimers[nickname];
-    }
-
-    // Inform user they successfully rejoined after disconnect
-if (socket && r.disconnectTimers[nickname] !== undefined) {
-  socket.emit('rejoinedGracefully', { nickname });
-}
+    const connectedNicknames = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(room))
+      .map(s => s.nickname);
 
     io.to(room).emit('participantsUpdate', {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
-      moods: r.moods
+      moods: r.moods,
+      connected: connectedNicknames
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -168,11 +169,17 @@ if (socket && r.disconnectTimers[nickname] !== undefined) {
   socket.on('updateMood', ({ nickname: name, emoji }) => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].moods[name] = emoji;
+
+      const connectedNow = [...io.sockets.sockets.values()]
+        .filter(s => s.rooms.has(currentRoom))
+        .map(s => s.nickname);
+
       io.to(currentRoom).emit('participantsUpdate', {
         names: rooms[currentRoom].participants,
         roles: rooms[currentRoom].roles,
         avatars: rooms[currentRoom].avatars,
-        moods: rooms[currentRoom].moods
+        moods: rooms[currentRoom].moods,
+        connected: connectedNow
       });
     }
   });
@@ -181,7 +188,20 @@ if (socket && r.disconnectTimers[nickname] !== undefined) {
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
 
-    // Set a grace period before full removal
+    // Emit immediately who is still connected
+    const connectedNow = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(currentRoom))
+      .map(s => s.nickname);
+
+    io.to(currentRoom).emit('participantsUpdate', {
+      names: r.participants,
+      roles: r.roles,
+      avatars: r.avatars,
+      moods: r.moods,
+      connected: connectedNow
+    });
+
+    // Graceful disconnect timer
     r.disconnectTimers[nickname] = setTimeout(() => {
       r.participants = r.participants.filter(p => p !== nickname);
       delete r.votes[nickname];
@@ -189,12 +209,18 @@ if (socket && r.disconnectTimers[nickname] !== undefined) {
       delete r.avatars[nickname];
       delete r.moods[nickname];
 
+      const stillConnected = [...io.sockets.sockets.values()]
+        .filter(s => s.rooms.has(currentRoom))
+        .map(s => s.nickname);
+
       io.to(currentRoom).emit('participantsUpdate', {
         names: r.participants,
         roles: r.roles,
         avatars: r.avatars,
-        moods: r.moods
+        moods: r.moods,
+        connected: stillConnected
       });
+
       socket.to(currentRoom).emit('userLeft', nickname);
 
       if (r.participants.length === 0) delete rooms[currentRoom];
