@@ -135,6 +135,18 @@ io.on('connection', (socket) => {
     }
   });
 
+// ────────────────────────────────────────
+// 4️⃣ End entire pointing session
+socket.on('endPointingSession', () => {
+  if (!currentRoom || !rooms[currentRoom]) return;
+  // 1) notify everyone
+  io.to(currentRoom).emit('sessionTerminated');
+  // 2) delete room data
+  delete rooms[currentRoom];
+});
+// ────────────────────────────────────────
+  
+
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
       rooms[room].votes = {};
