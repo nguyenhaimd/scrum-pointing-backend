@@ -1,7 +1,6 @@
 // ✅ FINAL Full Backend index.js for Scrum Pointing App
 // Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking
-// top of file
-const SYSTEM = 'System';
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -71,12 +70,6 @@ io.on('connection', (socket) => {
     });
 
     socket.to(room).emit('userJoined', nickname);
-// right after socket.to(room).emit('userJoined', nickname);
-io.to(room).emit('teamChat', {
-  sender: SYSTEM,
-  text: `${nickname} rejoined the session.`
-});
-
   });
 
   socket.on('vote', ({ nickname: name, point }) => {
@@ -142,18 +135,6 @@ io.to(room).emit('teamChat', {
     }
   });
 
-// ────────────────────────────────────────
-// 4️⃣ End entire pointing session
-socket.on('endPointingSession', () => {
-  if (!currentRoom || !rooms[currentRoom]) return;
-  // 1) notify everyone
-  io.to(currentRoom).emit('sessionTerminated');
-  // 2) delete room data
-  delete rooms[currentRoom];
-});
-// ────────────────────────────────────────
-  
-
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
       rooms[room].votes = {};
@@ -204,45 +185,7 @@ socket.on('endPointingSession', () => {
     }
   });
 
-  // logout handler
-  socket.on('logout', () => {
-    if (!currentRoom || !rooms[currentRoom]) return;
-    const r = rooms[currentRoom];
-  
-    // Remove user fully
-    r.participants = r.participants.filter(p => p !== nickname);
-    delete r.votes[nickname];
-    delete r.roles[nickname];
-    delete r.avatars[nickname];
-    delete r.moods[nickname];
-  
-    // Broadcast updated roster
-    io.to(currentRoom).emit('participantsUpdate', {
-      names:   r.participants,
-      roles:   r.roles,
-      avatars: r.avatars,
-      moods:   r.moods,
-      // you may also include connected list if you track it
-    });
-    socket.to(currentRoom).emit('userLeft', nickname);
-  
-    socket.leave(currentRoom);
-    console.log(`${nickname} logged out manually.`);
-  
-    // Clean up empty room
-    if (r.participants.length === 0) delete rooms[currentRoom];
-  });  
-
   socket.on('disconnect', () => {
-
-// first lines of socket.on('disconnect')
-if (currentRoom) {
-  io.to(currentRoom).emit('teamChat', {
-    sender: SYSTEM,
-    text: `${nickname} disconnected.`
-  });
-}
-
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
 
@@ -259,7 +202,6 @@ if (currentRoom) {
       connected: connectedNow
     });
 
-    {/*
     // Graceful disconnect timer
     r.disconnectTimers[nickname] = setTimeout(() => {
       r.participants = r.participants.filter(p => p !== nickname);
@@ -284,11 +226,6 @@ if (currentRoom) {
 
       if (r.participants.length === 0) delete rooms[currentRoom];
     }, GRACE_PERIOD_MS);
-   */}
-
-    // Auto‑removal on disconnect disabled.
-   console.log(`${nickname} disconnected but will remain until logout.`);
-
   });
 });
 
