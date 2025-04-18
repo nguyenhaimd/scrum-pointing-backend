@@ -25,7 +25,6 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let nickname = null;
 
-  {/* 
   socket.on('join', ({ nickname: name, room, role, avatar, emoji }) => {
     nickname = name;
     currentRoom = room;
@@ -80,59 +79,6 @@ io.to(room).emit('teamChat', {
 
   });
 
-*/}
-  
-socket.on('join', ({ nickname: name, room, role, avatar, emoji }) => {
-  nickname = name;
-  currentRoom = room;
-  socket.join(room);
-  socket.nickname = nickname;
-
-  if (!rooms[room]) {
-    rooms[room] = { /* … */ };
-  }
-  const r = rooms[room];
-
-  // —- Detect if this is a rejoin during the grace period:
-  const wasDisconnecting = Boolean(r.disconnectTimers[nickname]);
-  if (wasDisconnecting) {
-    clearTimeout(r.disconnectTimers[nickname]);
-    delete r.disconnectTimers[nickname];
-  } else if (!r.participants.includes(nickname)) {
-    r.participants.push(nickname);
-  }
-
-  // (re)store role/avatar/emoji…
-  r.roles[nickname]   = role;
-  r.avatars[nickname] = avatar;
-  r.moods[nickname]   = emoji;
-  r.votes[nickname]   = null;
-
-  // broadcast updated roster
-  const connected = [...io.sockets.sockets.values()]
-    .filter(s => s.rooms.has(room))
-    .map(s => s.nickname);
-  io.to(room).emit('participantsUpdate', {
-    names:     r.participants,
-    roles:     r.roles,
-    avatars:   r.avatars,
-    moods:     r.moods,
-    connected,
-  });
-
-  // —- ONLY emit one “system chat” on rejoin
-  if (wasDisconnecting) {
-    io.to(room).emit('teamChat', {
-      sender: 'System',
-      text: `${nickname} has rejoined the session.`
-    });
-  } else {
-    // first‐time join: still let clients know someone arrived
-    socket.to(room).emit('userJoined', nickname);
-  }
-});
-
-  
   socket.on('vote', ({ nickname: name, point }) => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes[name] = point;
