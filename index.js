@@ -1,6 +1,7 @@
 // ✅ FINAL Full Backend index.js for Scrum Pointing App
 // Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking
-
+// top of file
+const SYSTEM = 'System';
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -70,6 +71,12 @@ io.on('connection', (socket) => {
     });
 
     socket.to(room).emit('userJoined', nickname);
+// right after socket.to(room).emit('userJoined', nickname);
+io.to(room).emit('teamChat', {
+  sender: SYSTEM,
+  text: `${nickname} rejoined the session.`
+});
+
   });
 
   socket.on('vote', ({ nickname: name, point }) => {
@@ -227,6 +234,15 @@ socket.on('endPointingSession', () => {
   });  
 
   socket.on('disconnect', () => {
+
+// first lines of socket.on('disconnect')
+if (currentRoom) {
+  io.to(currentRoom).emit('teamChat', {
+    sender: SYSTEM,
+    text: `${nickname} disconnected.`
+  });
+}
+
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
 
