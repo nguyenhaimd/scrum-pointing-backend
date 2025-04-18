@@ -71,11 +71,6 @@ io.on('connection', (socket) => {
     });
 
     socket.to(room).emit('userJoined', nickname);
-// right after socket.to(room).emit('userJoined', nickname);
-io.to(room).emit('teamChat', {
-  sender: SYSTEM,
-  text: `${nickname} rejoined the session.`
-});
 
   });
 
@@ -235,14 +230,6 @@ socket.on('endPointingSession', () => {
 
   socket.on('disconnect', () => {
 
-// first lines of socket.on('disconnect')
-if (currentRoom) {
-  io.to(currentRoom).emit('teamChat', {
-    sender: SYSTEM,
-    text: `${nickname} disconnected.`
-  });
-}
-
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
 
@@ -257,34 +244,7 @@ if (currentRoom) {
       avatars: r.avatars,
       moods: r.moods,
       connected: connectedNow
-    });
-
-    {/*
-    // Graceful disconnect timer
-    r.disconnectTimers[nickname] = setTimeout(() => {
-      r.participants = r.participants.filter(p => p !== nickname);
-      delete r.votes[nickname];
-      delete r.roles[nickname];
-      delete r.avatars[nickname];
-      delete r.moods[nickname];
-
-      const stillConnected = [...io.sockets.sockets.values()]
-        .filter(s => s.rooms.has(currentRoom))
-        .map(s => s.nickname);
-
-      io.to(currentRoom).emit('participantsUpdate', {
-        names: r.participants,
-        roles: r.roles,
-        avatars: r.avatars,
-        moods: r.moods,
-        connected: stillConnected
-      });
-
-      socket.to(currentRoom).emit('userLeft', nickname);
-
-      if (r.participants.length === 0) delete rooms[currentRoom];
-    }, GRACE_PERIOD_MS);
-   */}
+    })
 
     // Auto‑removal on disconnect disabled.
    console.log(`${nickname} disconnected but will remain until logout.`);
