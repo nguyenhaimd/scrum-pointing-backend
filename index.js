@@ -50,10 +50,6 @@ io.on('connection', (socket) => {
     } else if (r.disconnectTimers[nickname]) {
       clearTimeout(r.disconnectTimers[nickname]);
       delete r.disconnectTimers[nickname];
-
-      // 🔔 Let everyone else know this user has just reconnected:
-  socket.to(room).emit('userReconnected', nickname);
-
     }
 
     r.roles[nickname] = role;
@@ -150,54 +146,7 @@ socket.on('endPointingSession', () => {
 });
 // ────────────────────────────────────────
   
-// ── inside io.on('connection') ──
 
-// Only Scrum Masters can ask to remove someone
-socket.on('removeUser', ({ nickname: target }) => {
-  const room = currentRoom;
-  if (!room || !rooms[room]) return;
-  const r = rooms[room];
-
-  // verify that the requester is a Scrum Master
-  if (r.roles[socket.nickname] !== 'Scrum Master') return;
-
-  // find the socket for that target nickname
-  const targetSocket = [...io.sockets.sockets.values()].find(
-    s => s.nickname === target && s.rooms.has(room)
-  );
-  if (!targetSocket) return;
-
-  // remove from our in-memory room state
-  r.participants = r.participants.filter(p => p !== target);
-  delete r.roles[target];
-  delete r.avatars[target];
-  delete r.moods[target];
-  delete r.votes[target];
-  if (r.disconnectTimers[target]) {
-    clearTimeout(r.disconnectTimers[target]);
-    delete r.disconnectTimers[target];
-  }
-
-  // inform everyone in the room of the updated list
-  const connectedNow = [...io.sockets.sockets.values()]
-    .filter(s => s.rooms.has(room))
-    .map(s => s.nickname);
-  io.to(room).emit('participantsUpdate', {
-    names: r.participants,
-    roles: r.roles,
-    avatars: r.avatars,
-    moods: r.moods,
-    connected: connectedNow
-  });
-
-  // tell the target socket they've been removed
-  targetSocket.emit('removedByMaster');
-  // and actually kick them out of the room
-  targetSocket.leave(room);
-});
-  
-  
-  
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
       rooms[room].votes = {};
