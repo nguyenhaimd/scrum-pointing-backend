@@ -86,13 +86,17 @@ io.on('connection', (socket) => {
     const votes = room.votes || {};
     const freq = {};
   
-    // ✅ Step A: Filter only developers who cast valid (non-blank) votes
-    const developers = room.participants.filter(p => room.roles[p] === 'Developer');
-    const validVoters = developers.filter(name =>
+    // Identify connected developers
+    const connectedDevelopers = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(currentRoom) && room.roles[s.nickname] === 'Developer')
+      .map(s => s.nickname);
+  
+    // Filter out developers with blank votes
+    const validVoters = connectedDevelopers.filter(name =>
       votes[name] !== null && votes[name] !== undefined && votes[name] !== ''
     );
   
-    // ✅ Step B: Tally frequency of only valid numeric votes
+    // Tally frequency of valid numeric votes
     validVoters.forEach((name) => {
       const point = Number(votes[name]);
       if (!isNaN(point)) {
@@ -100,13 +104,13 @@ io.on('connection', (socket) => {
       }
     });
   
-    // ✅ Step C: Calculate consensus from valid votes
-    const max = Math.max(...Object.values(freq), 0); // fallback to 0 if no votes
+    // Determine consensus
+    const max = Math.max(...Object.values(freq), 0);
     const consensus = Object.keys(freq)
       .filter(k => freq[k] === max)
       .map(Number);
   
-    // ✅ Step D: Build vote summary list — only for valid voters
+    // Prepare vote summary
     const voteList = validVoters.map((name) => ({
       name,
       avatar: room.avatars[name],
@@ -119,10 +123,10 @@ io.on('connection', (socket) => {
       second: '2-digit'
     });
   
-    // ✅ Step E: Notify all clients that voting is revealed
+    // Notify all clients about vote reveal
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
   
-    // ✅ Step F: Send detailed summary only to Scrum Masters
+    // Send detailed summary to Scrum Masters
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
     for (const smName of scrumMasters) {
       const smSocket = [...io.sockets.sockets.values()].find(
