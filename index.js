@@ -82,36 +82,44 @@ io.on('connection', (socket) => {
   socket.on('revealVotes', () => {
     if (!rooms[currentRoom]) return;
     const room = rooms[currentRoom];
-    const developers = room.participants.filter(p => room.roles[p] === 'Developer');
     const votes = room.votes || {};
     const freq = {};
-
-    developers.forEach((name) => {
+  
+    // ✅ Get only Developers who cast a valid vote (non-null, non-empty)
+    const developers = room.participants.filter(p => room.roles[p] === 'Developer');
+    const validVotes = developers.filter(name => votes[name] !== null && votes[name] !== undefined && votes[name] !== '');
+  
+    // ✅ Count frequency of valid numeric votes
+    validVotes.forEach((name) => {
       const point = Number(votes[name]);
-      if (!isNaN(point)) freq[point] = (freq[point] || 0) + 1;
+      if (!isNaN(point)) {
+        freq[point] = (freq[point] || 0) + 1;
+      }
     });
-
-    const max = Math.max(...Object.values(freq));
+  
+    // ✅ Calculate consensus from valid votes only
+    const max = Math.max(...Object.values(freq), 0); // prevent -Infinity if no valid votes
     const consensus = Object.keys(freq)
       .filter(k => freq[k] === max)
       .map(Number);
-
-    const voteList = developers.map((name) => ({
+  
+    // ✅ Only include valid voters in vote summary
+    const voteList = validVotes.map((name) => ({
       name,
       avatar: room.avatars[name],
       point: votes[name],
     }));
-
+  
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
+  
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
-
+  
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
     for (const smName of scrumMasters) {
       const smSocket = [...io.sockets.sockets.values()].find(
         s => s.rooms.has(currentRoom) && s.nickname === smName
       );
-
+  
       if (smSocket) {
         smSocket.emit('teamChat', {
           type: 'voteSummary',
@@ -126,6 +134,7 @@ io.on('connection', (socket) => {
       }
     }
   });
+
 
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
@@ -242,33 +251,6 @@ socket.on('endPointingSession', () => {
       moods: r.moods,
       connected: connectedNow
     });
-
-    {/*
-    // Graceful disconnect timer
-    r.disconnectTimers[nickname] = setTimeout(() => {
-      r.participants = r.participants.filter(p => p !== nickname);
-      delete r.votes[nickname];
-      delete r.roles[nickname];
-      delete r.avatars[nickname];
-      delete r.moods[nickname];
-
-      const stillConnected = [...io.sockets.sockets.values()]
-        .filter(s => s.rooms.has(currentRoom))
-        .map(s => s.nickname);
-
-      io.to(currentRoom).emit('participantsUpdate', {
-        names: r.participants,
-        roles: r.roles,
-        avatars: r.avatars,
-        moods: r.moods,
-        connected: stillConnected
-      });
-
-      socket.to(currentRoom).emit('userLeft', nickname);
-
-      if (r.participants.length === 0) delete rooms[currentRoom];
-    }, GRACE_PERIOD_MS);
-   */}
 
     // Auto‑removal on disconnect disabled.
    console.log(`${nickname} disconnected but will remain until logout.`);
