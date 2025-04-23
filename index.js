@@ -144,6 +144,47 @@ io.on('connection', (socket) => {
     }
   });
 
+
+  socket.on('forceRemoveUser', (targetNickname) => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+  
+    const room = rooms[currentRoom];
+    const senderRole = room.roles[nickname];
+    if (senderRole !== 'Scrum Master') return;
+  
+    if (!room.participants.includes(targetNickname)) return;
+  
+    // 🔐 Check if the target user is still online
+    const isStillConnected = [...io.sockets.sockets.values()]
+      .some(s => s.rooms.has(currentRoom) && s.nickname === targetNickname);
+  
+    if (isStillConnected) {
+      console.log(`🚫 Attempted to remove online user: ${targetNickname}`);
+      return;
+    }
+  
+    // ✅ Safe to remove
+    room.participants = room.participants.filter(p => p !== targetNickname);
+    delete room.roles[targetNickname];
+    delete room.avatars[targetNickname];
+    delete room.moods[targetNickname];
+    delete room.votes[targetNickname];
+  
+    // Notify all
+    io.to(currentRoom).emit('participantsUpdate', {
+      names: room.participants,
+      roles: room.roles,
+      avatars: room.avatars,
+      moods: room.moods,
+      connected: [...io.sockets.sockets.values()]
+        .filter(s => s.rooms.has(currentRoom))
+        .map(s => s.nickname)
+    });
+  
+    io.to(currentRoom).emit('userLeft', targetNickname);
+    console.log(`✅ ${targetNickname} removed by Scrum Master`);
+  });
+
 // ────────────────────────────────────────
 // 4️⃣ End entire pointing session
 socket.on('endPointingSession', () => {
