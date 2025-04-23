@@ -79,41 +79,50 @@ io.on('connection', (socket) => {
     }
   });
 
+
   socket.on('revealVotes', () => {
     if (!rooms[currentRoom]) return;
     const room = rooms[currentRoom];
     const votes = room.votes || {};
     const freq = {};
   
-    // ✅ Get only Developers who cast a valid vote (non-null, non-empty)
+    // ✅ Step A: Filter only developers who cast valid (non-blank) votes
     const developers = room.participants.filter(p => room.roles[p] === 'Developer');
-    const validVotes = developers.filter(name => votes[name] !== null && votes[name] !== undefined && votes[name] !== '');
+    const validVoters = developers.filter(name =>
+      votes[name] !== null && votes[name] !== undefined && votes[name] !== ''
+    );
   
-    // ✅ Count frequency of valid numeric votes
-    validVotes.forEach((name) => {
+    // ✅ Step B: Tally frequency of only valid numeric votes
+    validVoters.forEach((name) => {
       const point = Number(votes[name]);
       if (!isNaN(point)) {
         freq[point] = (freq[point] || 0) + 1;
       }
     });
   
-    // ✅ Calculate consensus from valid votes only
-    const max = Math.max(...Object.values(freq), 0); // prevent -Infinity if no valid votes
+    // ✅ Step C: Calculate consensus from valid votes
+    const max = Math.max(...Object.values(freq), 0); // fallback to 0 if no votes
     const consensus = Object.keys(freq)
       .filter(k => freq[k] === max)
       .map(Number);
   
-    // ✅ Only include valid voters in vote summary
-    const voteList = validVotes.map((name) => ({
+    // ✅ Step D: Build vote summary list — only for valid voters
+    const voteList = validVoters.map((name) => ({
       name,
       avatar: room.avatars[name],
       point: votes[name],
     }));
   
-    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const timestamp = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   
+    // ✅ Step E: Notify all clients that voting is revealed
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
   
+    // ✅ Step F: Send detailed summary only to Scrum Masters
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
     for (const smName of scrumMasters) {
       const smSocket = [...io.sockets.sockets.values()].find(
@@ -134,6 +143,7 @@ io.on('connection', (socket) => {
       }
     }
   });
+
 
 
   socket.on('endSession', () => {
