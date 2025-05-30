@@ -1,4 +1,5 @@
-// ✅ COMPLETE BACKEND index.js for Scrum Pointing App
+// ✅ Full Verified Backend index.js for Scrum Pointing App
+// Includes: reconnection grace period, device detection, role/avatar/mood sync, disconnect handling
 
 const express = require('express');
 const http = require('http');
@@ -16,42 +17,14 @@ const io = new Server(server, {
   }
 });
 
-const GRACE_PERIOD_MS = 20 * 60 * 1000; // 20 minutes
-type RoomData = {
-  participants: string[];
-  roles: { [key: string]: string };
-  avatars: { [key: string]: string };
-  moods: { [key: string]: string };
-  votes: { [key: string]: string | null };
-  typing: string[];
-  currentStory: string;
-  disconnectTimers: { [key: string]: NodeJS.Timeout };
-  devices: { [key: string]: 'mobile' | 'desktop' };
-};
-
-const rooms = {}; // roomName -> RoomData
+const GRACE_PERIOD_MS = 20 * 60 * 1000;
+const rooms = {}; // roomName => { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers, devices }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
   let nickname = null;
   const userAgent = socket.handshake.headers['user-agent'] || '';
   const isMobile = /mobile/i.test(userAgent);
-
-  const getConnectedNicknames = (room) => [...io.sockets.sockets.values()]
-    .filter(s => s.rooms.has(room))
-    .map(s => s.nickname);
-
-  const emitParticipants = (room) => {
-    const r = rooms[room];
-    io.to(room).emit('participantsUpdate', {
-      names: r.participants,
-      roles: r.roles,
-      avatars: r.avatars,
-      moods: r.moods,
-      connected: getConnectedNicknames(room),
-      devices: r.devices
-    });
-  };
 
   socket.on('join', ({ nickname: name, room, role, avatar, emoji }) => {
     nickname = name;
@@ -88,7 +61,7 @@ io.on('connection', (socket) => {
     r.votes[nickname] = null;
     r.devices[nickname] = isMobile ? 'mobile' : 'desktop';
 
-    emitParticipants(room);
+    updateRoom(room);
     socket.to(room).emit('userJoined', nickname);
   });
 
@@ -105,15 +78,13 @@ io.on('connection', (socket) => {
     const votes = room.votes || {};
     const freq = {};
 
-    const connectedDevelopers = getConnectedNicknames(currentRoom).filter(
-      name => room.roles[name] === 'Developer'
-    );
+    const connectedDevelopers = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(currentRoom) && room.roles[s.nickname] === 'Developer')
+      .map(s => s.nickname);
 
-    const validVoters = connectedDevelopers.filter(
-      name => votes[name] !== null && votes[name] !== undefined && votes[name] !== ''
-    );
+    const validVoters = connectedDevelopers.filter(name => votes[name]);
 
-    validVoters.forEach((name) => {
+    validVoters.forEach(name => {
       const point = Number(votes[name]);
       if (!isNaN(point)) {
         freq[point] = (freq[point] || 0) + 1;
@@ -123,25 +94,19 @@ io.on('connection', (socket) => {
     const max = Math.max(...Object.values(freq), 0);
     const consensus = Object.keys(freq).filter(k => freq[k] === max).map(Number);
 
-    const voteList = validVoters.map((name) => ({
+    const voteList = validVoters.map(name => ({
       name,
       avatar: room.avatars[name],
-      point: votes[name],
+      point: votes[name]
     }));
 
-    const timestamp = new Date().toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
 
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
     for (const smName of scrumMasters) {
-      const smSocket = [...io.sockets.sockets.values()].find(
-        s => s.rooms.has(currentRoom) && s.nickname === smName
-      );
+      const smSocket = [...io.sockets.sockets.values()].find(s => s.rooms.has(currentRoom) && s.nickname === smName);
       if (smSocket) {
         smSocket.emit('teamChat', {
           type: 'voteSummary',
@@ -163,6 +128,35 @@ io.on('connection', (socket) => {
       rooms[currentRoom].currentStory = '';
       io.to(currentRoom).emit('sessionEnded');
     }
+  });
+
+  socket.on('forceRemoveUser', (targetNickname) => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    const room = rooms[currentRoom];
+    const senderRole = room.roles[nickname];
+    if (senderRole !== 'Scrum Master') return;
+    if (!room.participants.includes(targetNickname)) return;
+
+    const isStillConnected = [...io.sockets.sockets.values()]
+      .some(s => s.rooms.has(currentRoom) && s.nickname === targetNickname);
+
+    if (isStillConnected) return;
+
+    room.participants = room.participants.filter(p => p !== targetNickname);
+    delete room.roles[targetNickname];
+    delete room.avatars[targetNickname];
+    delete room.moods[targetNickname];
+    delete room.votes[targetNickname];
+    delete room.devices[targetNickname];
+
+    updateRoom(currentRoom);
+    io.to(currentRoom).emit('userLeft', targetNickname);
+  });
+
+  socket.on('endPointingSession', () => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    io.to(currentRoom).emit('sessionTerminated');
+    delete rooms[currentRoom];
   });
 
   socket.on('startSession', ({ title, room }) => {
@@ -200,67 +194,53 @@ io.on('connection', (socket) => {
   socket.on('updateMood', ({ nickname: name, emoji }) => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].moods[name] = emoji;
-      emitParticipants(currentRoom);
+      updateRoom(currentRoom);
     }
   });
 
   socket.on('logout', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
-    const r = rooms[currentRoom];
-    r.participants = r.participants.filter(p => p !== nickname);
-    delete r.votes[nickname];
-    delete r.roles[nickname];
-    delete r.avatars[nickname];
-    delete r.moods[nickname];
-    delete r.devices[nickname];
-    emitParticipants(currentRoom);
+    removeUser(currentRoom, nickname);
     socket.to(currentRoom).emit('userLeft', nickname);
     socket.leave(currentRoom);
-    if (r.participants.length === 0) delete rooms[currentRoom];
-  });
-
-  socket.on('forceRemoveUser', (targetNickname) => {
-    if (!currentRoom || !rooms[currentRoom]) return;
-    const room = rooms[currentRoom];
-    const senderRole = room.roles[nickname];
-    if (senderRole !== 'Scrum Master') return;
-    if (!room.participants.includes(targetNickname)) return;
-
-    const isStillConnected = getConnectedNicknames(currentRoom).includes(targetNickname);
-    if (isStillConnected) return;
-
-    room.participants = room.participants.filter(p => p !== targetNickname);
-    delete room.roles[targetNickname];
-    delete room.avatars[targetNickname];
-    delete room.moods[targetNickname];
-    delete room.votes[targetNickname];
-    delete room.devices[targetNickname];
-
-    emitParticipants(currentRoom);
-    io.to(currentRoom).emit('userLeft', targetNickname);
-  });
-
-  socket.on('endPointingSession', () => {
-    if (!currentRoom || !rooms[currentRoom]) return;
-    io.to(currentRoom).emit('sessionTerminated');
-    delete rooms[currentRoom];
   });
 
   socket.on('disconnect', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
-    const r = rooms[currentRoom];
-    r.disconnectTimers[nickname] = setTimeout(() => {
-      r.participants = r.participants.filter(p => p !== nickname);
-      delete r.roles[nickname];
-      delete r.avatars[nickname];
-      delete r.moods[nickname];
-      delete r.votes[nickname];
-      delete r.devices[nickname];
-      delete r.disconnectTimers[nickname];
-      emitParticipants(currentRoom);
+    const room = rooms[currentRoom];
+    room.disconnectTimers[nickname] = setTimeout(() => {
+      removeUser(currentRoom, nickname);
+      io.to(currentRoom).emit('userLeft', nickname);
     }, GRACE_PERIOD_MS);
-    emitParticipants(currentRoom);
+    updateRoom(currentRoom);
   });
+
+  function updateRoom(roomName) {
+    const room = rooms[roomName];
+    const connectedNow = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(roomName))
+      .map(s => s.nickname);
+    io.to(roomName).emit('participantsUpdate', {
+      names: room.participants,
+      roles: room.roles,
+      avatars: room.avatars,
+      moods: room.moods,
+      connected: connectedNow,
+      devices: room.devices
+    });
+  }
+
+  function removeUser(roomName, name) {
+    const r = rooms[roomName];
+    r.participants = r.participants.filter(p => p !== name);
+    delete r.votes[name];
+    delete r.roles[name];
+    delete r.avatars[name];
+    delete r.moods[name];
+    delete r.devices[name];
+    delete r.disconnectTimers[name];
+    updateRoom(roomName);
+  }
 });
 
 const PORT = process.env.PORT || 10000;
