@@ -24,7 +24,7 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let nickname = null;
 
-  socket.on('join', ({ nickname: name, room, role, avatar, emoji }) => {
+  socket.on('join', ({ nickname: name, room, role, avatar, emoji, device }) => {
     nickname = name;
     currentRoom = room;
     socket.join(room);
@@ -39,7 +39,8 @@ io.on('connection', (socket) => {
         votes: {},
         typing: [],
         currentStory: '',
-        disconnectTimers: {}
+        disconnectTimers: {},
+        devices: {}
       };
     }
 
@@ -56,6 +57,7 @@ io.on('connection', (socket) => {
     r.avatars[nickname] = avatar;
     r.moods[nickname] = emoji;
     r.votes[nickname] = null;
+    r.devices[nickname] = device;
 
     const connectedNicknames = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(room))
@@ -66,7 +68,8 @@ io.on('connection', (socket) => {
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
-      connected: connectedNicknames
+      connected: connectedNicknames,
+      devices: r.devices
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -183,6 +186,7 @@ io.on('connection', (socket) => {
     delete room.avatars[targetNickname];
     delete room.moods[targetNickname];
     delete room.votes[targetNickname];
+    delete room.devices[targetNickname];
   
     // Notify all
     io.to(currentRoom).emit('participantsUpdate', {
@@ -192,7 +196,8 @@ io.on('connection', (socket) => {
       moods: room.moods,
       connected: [...io.sockets.sockets.values()]
         .filter(s => s.rooms.has(currentRoom))
-        .map(s => s.nickname)
+        .map(s => s.nickname),
+      devices: r.devices
     });
   
     io.to(currentRoom).emit('userLeft', targetNickname);
@@ -256,7 +261,8 @@ socket.on('endPointingSession', () => {
         roles: rooms[currentRoom].roles,
         avatars: rooms[currentRoom].avatars,
         moods: rooms[currentRoom].moods,
-        connected: connectedNow
+        connected: connectedNow,
+        devices: rooms[currentRoom].devices
       });
     }
   });
@@ -272,6 +278,7 @@ socket.on('endPointingSession', () => {
     delete r.roles[nickname];
     delete r.avatars[nickname];
     delete r.moods[nickname];
+    delete r.devices[nickname];
   
     // Broadcast updated roster
     io.to(currentRoom).emit('participantsUpdate', {
