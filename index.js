@@ -270,6 +270,11 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
+    r.participants = r.participants.filter(p => p !== nickname);
+    delete r.roles[nickname];
+    delete r.avatars[nickname];
+    delete r.moods[nickname];
+    delete r.devices[nickname];
     const connectedNow = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(currentRoom))
       .map(s => s.nickname);
@@ -281,6 +286,8 @@ io.on('connection', (socket) => {
       connected: connectedNow,
       devices: r.devices
     });
+    console.log(`${nickname} disconnected and removed from room ${currentRoom}`);
+  });
     console.log(`${nickname} disconnected but will remain until logout.`);
   });
 });
