@@ -1,5 +1,5 @@
 // ✅ FINAL Full Backend index.js for Scrum Pointing App
-// Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking
+// Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking, device type detection
 
 const express = require('express');
 const http = require('http');
@@ -18,11 +18,13 @@ const io = new Server(server, {
 });
 
 const GRACE_PERIOD_MS = 20 * 60 * 1000; // 20 minutes
-const rooms = {}; // roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers }
+const rooms = {}; // roomName: { participants, roles, avatars, moods, votes, typing, currentStory, disconnectTimers, devices }
 
 io.on('connection', (socket) => {
   let currentRoom = null;
   let nickname = null;
+  const userAgent = socket.handshake.headers['user-agent'] || '';
+  const isMobile = /mobile/i.test(userAgent);
 
   socket.on('join', ({ nickname: name, room, role, avatar, emoji }) => {
     nickname = name;
@@ -39,7 +41,8 @@ io.on('connection', (socket) => {
         votes: {},
         typing: [],
         currentStory: '',
-        disconnectTimers: {}
+        disconnectTimers: {},
+        devices: {}
       };
     }
 
@@ -56,6 +59,7 @@ io.on('connection', (socket) => {
     r.avatars[nickname] = avatar;
     r.moods[nickname] = emoji;
     r.votes[nickname] = null;
+    r.devices[nickname] = isMobile ? 'mobile' : 'desktop';
 
     const connectedNicknames = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(room))
@@ -66,7 +70,8 @@ io.on('connection', (socket) => {
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
-      connected: connectedNicknames
+      connected: connectedNicknames,
+      devices: r.devices
     });
 
     socket.to(room).emit('userJoined', nickname);
@@ -79,60 +84,52 @@ io.on('connection', (socket) => {
     }
   });
 
-
   socket.on('revealVotes', () => {
     if (!rooms[currentRoom]) return;
     const room = rooms[currentRoom];
     const votes = room.votes || {};
     const freq = {};
-  
-    // Identify connected developers
+
     const connectedDevelopers = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(currentRoom) && room.roles[s.nickname] === 'Developer')
       .map(s => s.nickname);
-  
-    // Filter out developers with blank votes
+
     const validVoters = connectedDevelopers.filter(name =>
       votes[name] !== null && votes[name] !== undefined && votes[name] !== ''
     );
-  
-    // Tally frequency of valid numeric votes
+
     validVoters.forEach((name) => {
       const point = Number(votes[name]);
       if (!isNaN(point)) {
         freq[point] = (freq[point] || 0) + 1;
       }
     });
-  
-    // Determine consensus
+
     const max = Math.max(...Object.values(freq), 0);
     const consensus = Object.keys(freq)
       .filter(k => freq[k] === max)
       .map(Number);
-  
-    // Prepare vote summary
+
     const voteList = validVoters.map((name) => ({
       name,
       avatar: room.avatars[name],
       point: votes[name],
     }));
-  
+
     const timestamp = new Date().toLocaleTimeString([], {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit'
     });
-  
-    // Notify all clients about vote reveal
+
     io.to(currentRoom).emit('revealVotes', { story: room.currentStory });
-  
-    // Send detailed summary to Scrum Masters
+
     const scrumMasters = room.participants.filter(p => room.roles[p] === 'Scrum Master');
     for (const smName of scrumMasters) {
       const smSocket = [...io.sockets.sockets.values()].find(
         s => s.rooms.has(currentRoom) && s.nickname === smName
       );
-  
+
       if (smSocket) {
         smSocket.emit('teamChat', {
           type: 'voteSummary',
@@ -148,8 +145,6 @@ io.on('connection', (socket) => {
     }
   });
 
-
-
   socket.on('endSession', () => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].votes = {};
@@ -158,33 +153,28 @@ io.on('connection', (socket) => {
     }
   });
 
-
   socket.on('forceRemoveUser', (targetNickname) => {
     if (!currentRoom || !rooms[currentRoom]) return;
-  
     const room = rooms[currentRoom];
     const senderRole = room.roles[nickname];
     if (senderRole !== 'Scrum Master') return;
-  
     if (!room.participants.includes(targetNickname)) return;
-  
-    // 🔐 Check if the target user is still online
+
     const isStillConnected = [...io.sockets.sockets.values()]
       .some(s => s.rooms.has(currentRoom) && s.nickname === targetNickname);
-  
+
     if (isStillConnected) {
       console.log(`🚫 Attempted to remove online user: ${targetNickname}`);
       return;
     }
-  
-    // ✅ Safe to remove
+
     room.participants = room.participants.filter(p => p !== targetNickname);
     delete room.roles[targetNickname];
     delete room.avatars[targetNickname];
     delete room.moods[targetNickname];
     delete room.votes[targetNickname];
-  
-    // Notify all
+    delete room.devices[targetNickname];
+
     io.to(currentRoom).emit('participantsUpdate', {
       names: room.participants,
       roles: room.roles,
@@ -192,24 +182,19 @@ io.on('connection', (socket) => {
       moods: room.moods,
       connected: [...io.sockets.sockets.values()]
         .filter(s => s.rooms.has(currentRoom))
-        .map(s => s.nickname)
+        .map(s => s.nickname),
+      devices: room.devices
     });
-  
+
     io.to(currentRoom).emit('userLeft', targetNickname);
     console.log(`✅ ${targetNickname} removed by Scrum Master`);
   });
 
-// ────────────────────────────────────────
-// 4️⃣ End entire pointing session
-socket.on('endPointingSession', () => {
-  if (!currentRoom || !rooms[currentRoom]) return;
-  // 1) notify everyone
-  io.to(currentRoom).emit('sessionTerminated');
-  // 2) delete room data
-  delete rooms[currentRoom];
-});
-// ────────────────────────────────────────
-  
+  socket.on('endPointingSession', () => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    io.to(currentRoom).emit('sessionTerminated');
+    delete rooms[currentRoom];
+  });
 
   socket.on('startSession', ({ title, room }) => {
     if (rooms[room]) {
@@ -246,70 +231,57 @@ socket.on('endPointingSession', () => {
   socket.on('updateMood', ({ nickname: name, emoji }) => {
     if (rooms[currentRoom]) {
       rooms[currentRoom].moods[name] = emoji;
-
       const connectedNow = [...io.sockets.sockets.values()]
         .filter(s => s.rooms.has(currentRoom))
         .map(s => s.nickname);
-
       io.to(currentRoom).emit('participantsUpdate', {
         names: rooms[currentRoom].participants,
         roles: rooms[currentRoom].roles,
         avatars: rooms[currentRoom].avatars,
         moods: rooms[currentRoom].moods,
-        connected: connectedNow
+        connected: connectedNow,
+        devices: rooms[currentRoom].devices
       });
     }
   });
 
-  // logout handler
   socket.on('logout', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
-  
-    // Remove user fully
     r.participants = r.participants.filter(p => p !== nickname);
     delete r.votes[nickname];
     delete r.roles[nickname];
     delete r.avatars[nickname];
     delete r.moods[nickname];
-  
-    // Broadcast updated roster
-    io.to(currentRoom).emit('participantsUpdate', {
-      names:   r.participants,
-      roles:   r.roles,
-      avatars: r.avatars,
-      moods:   r.moods,
-      // you may also include connected list if you track it
-    });
-    socket.to(currentRoom).emit('userLeft', nickname);
-  
-    socket.leave(currentRoom);
-    console.log(`${nickname} logged out manually.`);
-  
-    // Clean up empty room
-    if (r.participants.length === 0) delete rooms[currentRoom];
-  });  
-
-  socket.on('disconnect', () => {
-    if (!currentRoom || !rooms[currentRoom]) return;
-    const r = rooms[currentRoom];
-
-    // Emit immediately who is still connected
-    const connectedNow = [...io.sockets.sockets.values()]
-      .filter(s => s.rooms.has(currentRoom))
-      .map(s => s.nickname);
-
+    delete r.devices[nickname];
     io.to(currentRoom).emit('participantsUpdate', {
       names: r.participants,
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
-      connected: connectedNow
+      devices: r.devices
     });
+    socket.to(currentRoom).emit('userLeft', nickname);
+    socket.leave(currentRoom);
+    console.log(`${nickname} logged out manually.`);
+    if (r.participants.length === 0) delete rooms[currentRoom];
+  });
 
-    // Auto‑removal on disconnect disabled.
-   console.log(`${nickname} disconnected but will remain until logout.`);
-
+  socket.on('disconnect', () => {
+    if (!currentRoom || !rooms[currentRoom]) return;
+    const r = rooms[currentRoom];
+    const connectedNow = [...io.sockets.sockets.values()]
+      .filter(s => s.rooms.has(currentRoom))
+      .map(s => s.nickname);
+    io.to(currentRoom).emit('participantsUpdate', {
+      names: r.participants,
+      roles: r.roles,
+      avatars: r.avatars,
+      moods: r.moods,
+      connected: connectedNow,
+      devices: r.devices
+    });
+    console.log(`${nickname} disconnected but will remain until logout.`);
   });
 });
 
