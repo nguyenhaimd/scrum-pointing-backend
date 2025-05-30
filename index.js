@@ -1,5 +1,7 @@
-// ✅ FINAL Full Backend index.js for Scrum Pointing App
-// Includes: reconnection grace period, role/avatar-independent rejoin, connection status tracking, device type detection
+
+// ✅ FINAL Fixed Backend index.js for Scrum Pointing App
+// Fixes: stale offline users retained after disconnect
+// Includes: reconnection grace period, device type detection, clean disconnect handling
 
 const express = require('express');
 const http = require('http');
@@ -163,10 +165,7 @@ io.on('connection', (socket) => {
     const isStillConnected = [...io.sockets.sockets.values()]
       .some(s => s.rooms.has(currentRoom) && s.nickname === targetNickname);
 
-    if (isStillConnected) {
-      console.log(`🚫 Attempted to remove online user: ${targetNickname}`);
-      return;
-    }
+    if (isStillConnected) return;
 
     room.participants = room.participants.filter(p => p !== targetNickname);
     delete room.roles[targetNickname];
@@ -187,7 +186,6 @@ io.on('connection', (socket) => {
     });
 
     io.to(currentRoom).emit('userLeft', targetNickname);
-    console.log(`✅ ${targetNickname} removed by Scrum Master`);
   });
 
   socket.on('endPointingSession', () => {
@@ -259,11 +257,13 @@ io.on('connection', (socket) => {
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
+      connected: [...io.sockets.sockets.values()]
+        .filter(s => s.rooms.has(currentRoom))
+        .map(s => s.nickname),
       devices: r.devices
     });
     socket.to(currentRoom).emit('userLeft', nickname);
     socket.leave(currentRoom);
-    console.log(`${nickname} logged out manually.`);
     if (r.participants.length === 0) delete rooms[currentRoom];
   });
 
@@ -286,9 +286,7 @@ io.on('connection', (socket) => {
       connected: connectedNow,
       devices: r.devices
     });
-    console.log(`${nickname} disconnected and removed from room ${currentRoom}`);
-  });
-    console.log(`${nickname} disconnected but will remain until logout.`);
+    if (r.participants.length === 0) delete rooms[currentRoom];
   });
 });
 
