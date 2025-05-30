@@ -39,8 +39,7 @@ io.on('connection', (socket) => {
         votes: {},
         typing: [],
         currentStory: '',
-        disconnectTimers: {},
-        devices: {}
+        disconnectTimers: {}
       };
     }
 
@@ -57,7 +56,6 @@ io.on('connection', (socket) => {
     r.avatars[nickname] = avatar;
     r.moods[nickname] = emoji;
     r.votes[nickname] = null;
-    r.devices[nickname] = device; // ✅ Save device type
 
     const connectedNicknames = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(room))
@@ -68,8 +66,7 @@ io.on('connection', (socket) => {
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
-      connected: connectedNicknames,
-      devices: r.devices
+      connected: connectedNicknames
     });
 
     socket.to(room).emit('userJoined', nickname);
