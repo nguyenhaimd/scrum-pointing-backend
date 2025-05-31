@@ -297,11 +297,19 @@ socket.on('endPointingSession', () => {
     if (r.participants.length === 0) delete rooms[currentRoom];
   });  
 
-  socket.on('disconnect', () => {
+socket.on('disconnect', () => {
     if (!currentRoom || !rooms[currentRoom]) return;
     const r = rooms[currentRoom];
 
-    // Emit immediately who is still connected
+    // Remove user completely on disconnect
+    r.participants = r.participants.filter(p => p !== nickname);
+    delete r.roles[nickname];
+    delete r.avatars[nickname];
+    delete r.moods[nickname];
+    delete r.votes[nickname];
+    delete r.devices[nickname];
+
+    // Emit updated participant list
     const connectedNow = [...io.sockets.sockets.values()]
       .filter(s => s.rooms.has(currentRoom))
       .map(s => s.nickname);
@@ -311,12 +319,18 @@ socket.on('endPointingSession', () => {
       roles: r.roles,
       avatars: r.avatars,
       moods: r.moods,
-      connected: connectedNow
+      connected: connectedNow,
+      devices: r.devices
     });
 
-    // Auto‑removal on disconnect disabled.
-   console.log(`${nickname} disconnected but will remain until logout.`);
+    io.to(currentRoom).emit('userLeft', nickname);
+    console.log(`❌ ${nickname} disconnected and was removed from the room.`);
 
+    // Delete room if empty
+    if (r.participants.length === 0) {
+      delete rooms[currentRoom];
+      console.log(`🧹 Room "${currentRoom}" deleted because it became empty.`);
+    }
   });
 });
 
